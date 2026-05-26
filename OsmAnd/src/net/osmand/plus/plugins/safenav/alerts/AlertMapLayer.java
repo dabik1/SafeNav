@@ -1,13 +1,12 @@
 package net.osmand.plus.plugins.safenav.alerts;
 
 import android.content.Context;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.PointF;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
@@ -15,13 +14,10 @@ import android.os.Handler;
 import android.os.Looper;
 
 import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 
 import net.osmand.data.LatLon;
-import net.osmand.data.QuadRect;
 import net.osmand.data.RotatedTileBox;
 import net.osmand.plus.OsmandApplication;
-import net.osmand.plus.activities.MapActivity;
 import net.osmand.plus.plugins.safenav.alerts.AlertsManager.AlertRegion;
 import net.osmand.plus.views.OsmandMapTileView;
 import net.osmand.plus.views.layers.base.OsmandMapLayer;
@@ -33,72 +29,44 @@ import java.util.List;
  * SafeNav — Шар тривог на карті
  *
  * Малює:
- *  1. Червоний напівпрозорий оверлей поверх регіону тривоги
- *  2. Анімована пташка/літак що падає зверху з повідомленням
- *  3. Банер "⚠️ ТРИВОГА — Київська область"
+ *   1. Точний полігон межі області (червоний)
+ *   2. Анімований літак що падає в центр регіону
+ *   3. Банер "⚠ ПОВІТРЯНА ТРИВОГА — Київська область"
  */
 public class AlertMapLayer extends OsmandMapLayer {
 
     private static final String TAG = "SafeNav.AlertLayer";
 
     // --- Паінти ---
-    private final Paint overlayPaint   = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint fillPaint    = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint strokePaint  = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint bannerBgPaint  = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint bannerTxtPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint iconPaint      = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-    private final Paint pulsePaint     = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint shadowPaint    = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pulsePaint   = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     // --- Анімація ---
-    private float birdY         = -120f;   // поточна Y пташки (починає зверху)
-    private float birdTargetY   = 0f;      // куди летить
-    private float pulseRadius   = 0f;      // пульсуюче коло
+    private float birdOffsetY   = -200f; // зміщення від цільової точки
+    private float pulseRadius   = 0f;
     private float pulseAlpha    = 1f;
-    private boolean animating   = false;
     private boolean birdLanded  = false;
+    private boolean animating   = false;
 
     // --- Банер ---
-    private boolean showBanner      = false;
-    private String  bannerText      = "";
-    private float   bannerAlpha     = 0f;   // 0..1 fade-in
-    private long    bannerShowTime  = 0;
-    private static final long BANNER_DURATION_MS = 8_000;
+    private boolean showBanner     = false;
+    private String  bannerOblast   = "";
+    private float   bannerAlpha    = 0f;
+    private long    bannerShowTime = 0;
+    private static final long BANNER_MS = 9_000;
 
     // --- Дані ---
-    private List<AlertRegion> activeAlerts = new ArrayList<>();
+    private final List<AlertRegion> activeAlerts = new ArrayList<>();
     private final OsmandApplication app;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
-    // Регіони-полігони для областей України (центри областей для іконки)
-    // Повний список — центроїди всіх 25 областей
-    private static final float[][] OBLAST_CENTERS = {
-        // {lat, lon, name_hash} — спрощено, в повній версії точні полігони з OSM
-        {50.45f, 30.52f},  // Київська
-        {49.42f, 32.07f},  // Черкаська
-        {48.46f, 35.04f},  // Дніпропетровська
-        {49.59f, 36.23f},  // Харківська
-        {50.36f, 26.25f},  // Рівненська
-        {49.83f, 24.01f},  // Львівська
-        {48.29f, 25.56f},  // Чернівецька
-        {48.36f, 31.18f},  // Кіровоградська
-        {47.55f, 35.10f},  // Запорізька
-        {47.54f, 32.36f},  // Херсонська
-        {46.97f, 31.99f},  // Миколаївська
-        {46.49f, 30.74f},  // Одеська
-        {48.92f, 24.71f},  // Івано-Франківська
-        {49.56f, 25.60f},  // Тернопільська
-        {50.73f, 28.68f},  // Житомирська
-        {51.33f, 25.32f},  // Волинська
-        {51.73f, 33.91f},  // Сумська
-        {51.50f, 31.28f},  // Чернігівська
-        {50.91f, 34.80f},  // Полтавська
-        {48.63f, 22.29f},  // Закарпатська
-        {48.66f, 26.57f},  // Хмельницька
-        {50.26f, 28.66f},  // Вінницька
-        {48.08f, 37.80f},  // Донецька
-        {48.57f, 39.35f},  // Луганська
-        {50.60f, 26.25f},  // Хмельницька 2
-    };
+    // Піксельні координати центру поточного регіону (для літака)
+    private float targetScreenX = 0f;
+    private float targetScreenY = 0f;
+    private boolean targetValid = false;
 
     public AlertMapLayer(@NonNull Context ctx, @NonNull OsmandApplication app) {
         super(ctx);
@@ -107,290 +75,327 @@ public class AlertMapLayer extends OsmandMapLayer {
     }
 
     private void initPaints() {
-        // Червоний оверлей регіону
-        overlayPaint.setColor(Color.argb(60, 220, 30, 30));
-        overlayPaint.setStyle(Paint.Style.FILL);
+        // Заливка полігону
+        fillPaint.setColor(Color.argb(70, 220, 20, 20));
+        fillPaint.setStyle(Paint.Style.FILL);
 
-        // Фон банеру — темно-червоний градієнт
-        bannerBgPaint.setColor(Color.argb(230, 180, 0, 0));
+        // Контур полігону
+        strokePaint.setColor(Color.argb(200, 255, 40, 40));
+        strokePaint.setStyle(Paint.Style.STROKE);
+        strokePaint.setStrokeWidth(5f);
+        strokePaint.setPathEffect(new android.graphics.DashPathEffect(
+            new float[]{20f, 10f}, 0f));
+
+        // Банер фон
         bannerBgPaint.setStyle(Paint.Style.FILL);
 
-        // Текст банеру
+        // Банер текст
         bannerTxtPaint.setColor(Color.WHITE);
         bannerTxtPaint.setTypeface(Typeface.DEFAULT_BOLD);
-        bannerTxtPaint.setTextSize(44f);
         bannerTxtPaint.setTextAlign(Paint.Align.CENTER);
-        bannerTxtPaint.setShadowLayer(4f, 0f, 2f, Color.BLACK);
+        bannerTxtPaint.setShadowLayer(4f, 0, 2f, Color.BLACK);
 
-        // Пульс під іконкою
-        pulsePaint.setColor(Color.argb(120, 255, 50, 50));
+        // Пульс
         pulsePaint.setStyle(Paint.Style.STROKE);
-        pulsePaint.setStrokeWidth(6f);
-
-        // Тінь іконки
-        shadowPaint.setColor(Color.argb(80, 0, 0, 0));
-        shadowPaint.setStyle(Paint.Style.FILL);
-        shadowPaint.setMaskFilter(new android.graphics.BlurMaskFilter(
-            12f, android.graphics.BlurMaskFilter.Blur.NORMAL));
+        pulsePaint.setStrokeWidth(5f);
     }
+
+    // ----------------------------------------------------------------
+    // Головний метод малювання
+    // ----------------------------------------------------------------
 
     @Override
-    public void onDraw(@NonNull Canvas canvas, @NonNull RotatedTileBox tileBox, @NonNull DrawSettings settings) {
+    public void onDraw(@NonNull Canvas canvas, @NonNull RotatedTileBox tileBox,
+                       @NonNull DrawSettings settings) {
         if (activeAlerts.isEmpty()) return;
 
-        int screenW = canvas.getWidth();
-        int screenH = canvas.getHeight();
+        int w = canvas.getWidth();
+        int h = canvas.getHeight();
 
-        // 1. Малюємо червоний оверлей по всьому екрану (спрощено)
-        //    В повній версії — полігони областей з OSM
-        drawAlertOverlay(canvas, screenW, screenH);
+        for (AlertRegion alert : activeAlerts) {
+            if (!"air_raid".equals(alert.alertType)) continue;
 
-        // 2. Анімована іконка літак/пташка
-        drawAnimatedBird(canvas, screenW, screenH);
+            // 1. Малюємо полігон межі області
+            drawOblastPolygon(canvas, tileBox, alert);
+        }
 
-        // 3. Банер з назвою регіону
+        // 2. Анімований літак
+        if (targetValid) {
+            drawAnimatedAircraft(canvas, targetScreenX, targetScreenY + birdOffsetY);
+        }
+
+        // 3. Банер
         if (showBanner) {
-            drawAlertBanner(canvas, screenW, screenH);
+            drawAlertBanner(canvas, w, h);
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // Малювання полігону
+    // ----------------------------------------------------------------
+
+    private void drawOblastPolygon(Canvas canvas, RotatedTileBox tileBox, AlertRegion alert) {
+        double[][][] polygons = UkraineOblastBoundaries.findOblast(alert.locationTitle);
+        if (polygons == null) {
+            // Якщо область не знайдена — малюємо пульсуючий круг на центрі екрану
+            drawFallbackCircle(canvas, canvas.getWidth() / 2f, canvas.getHeight() / 2f);
+            return;
+        }
+
+        // Знаходимо центроїд для літака
+        double[] centroid = UkraineOblastBoundaries.getCentroid(polygons);
+        if (centroid != null) {
+            // Конвертуємо geo → screen
+            float[] screenPt = tileBox.getPixXYForLatLon(centroid[1], centroid[0]);
+            targetScreenX = screenPt[0];
+            targetScreenY = screenPt[1];
+            targetValid   = true;
+        }
+
+        // Малюємо кожен полігон (область може мати острови тощо)
+        for (double[][] ring : polygons) {
+            Path path = buildPath(ring, tileBox);
+            if (path == null) continue;
+
+            canvas.drawPath(path, fillPaint);
+            canvas.drawPath(path, strokePaint);
+        }
+
+        // Пульсуючий ефект поверх полігону
+        if (birdLanded && targetValid) {
+            pulsePaint.setColor(Color.argb((int)(pulseAlpha * 180), 255, 50, 50));
+            canvas.drawCircle(targetScreenX, targetScreenY, pulseRadius + 40, pulsePaint);
         }
     }
 
     /**
-     * Червоний напівпрозорий оверлей + пульсуючий контур
+     * Конвертує geo-координати полігону в Path на екрані
+     * coords[i] = [longitude, latitude]
      */
-    private void drawAlertOverlay(Canvas canvas, int w, int h) {
-        // Повний екран — тривога активна
-        canvas.drawRect(0, 0, w, h, overlayPaint);
+    private Path buildPath(double[][] coords, RotatedTileBox tileBox) {
+        if (coords == null || coords.length < 3) return null;
 
-        // Пульсуючий червоний контур по краях
-        pulsePaint.setAlpha((int)(pulseAlpha * 180));
-        float margin = pulseRadius;
-        canvas.drawRect(margin, margin, w - margin, h - margin, pulsePaint);
-    }
+        Path path = new Path();
+        boolean first = true;
 
-    /**
-     * Анімована іконка: літак падає зверху, приземляється в центрі
-     */
-    private void drawAnimatedBird(Canvas canvas, int w, int h) {
-        float cx = w / 2f;
-        float cy = h / 2f;
+        for (double[] coord : coords) {
+            double lon = coord[0];
+            double lat = coord[1];
 
-        // Тінь під іконкою (з'являється коли приземляється)
-        if (birdLanded) {
-            float shadowScale = 1f - (birdY - birdTargetY) / h;
-            canvas.drawOval(
-                new RectF(cx - 40 * shadowScale, cy + 50,
-                          cx + 40 * shadowScale, cy + 62),
-                shadowPaint
-            );
+            // Перевірка що координати в межах України
+            if (lat < 44 || lat > 53 || lon < 22 || lon > 41) continue;
+
+            float[] xy = tileBox.getPixXYForLatLon(lat, lon);
+            float px = xy[0];
+            float py = xy[1];
+
+            if (first) {
+                path.moveTo(px, py);
+                first = false;
+            } else {
+                path.lineTo(px, py);
+            }
         }
 
-        // Малюємо іконку літак/пташка
+        if (first) return null; // жодної точки не потрапило на екран
+        path.close();
+        return path;
+    }
+
+    private void drawFallbackCircle(Canvas canvas, float cx, float cy) {
+        Paint circlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        circlePaint.setColor(Color.argb(60, 220, 20, 20));
+        circlePaint.setStyle(Paint.Style.FILL);
+        canvas.drawCircle(cx, cy, 300f, circlePaint);
+        circlePaint.setColor(Color.argb(150, 255, 40, 40));
+        circlePaint.setStyle(Paint.Style.STROKE);
+        circlePaint.setStrokeWidth(4f);
+        canvas.drawCircle(cx, cy, 300f, circlePaint);
+    }
+
+    // ----------------------------------------------------------------
+    // Анімований літак
+    // ----------------------------------------------------------------
+
+    private void drawAnimatedAircraft(Canvas canvas, float cx, float cy) {
         canvas.save();
-        canvas.translate(cx, birdY);
+        canvas.translate(cx, cy);
 
-        // Обертання вниз при падінні
-        float rotation = birdLanded ? 0f : -15f;
-        canvas.rotate(rotation);
+        float tilt = birdLanded ? 0f : -20f; // нахил при падінні
+        canvas.rotate(tilt);
 
-        // Малюємо простий SVG-like літак з Path
-        drawAircraftIcon(canvas, birdLanded ? 0.8f : 1.0f);
+        float scale = birdLanded ? 0.9f : 1.1f;
+        drawAircraftPath(canvas, scale);
 
         canvas.restore();
 
-        // Пульсуюче коло після приземлення
+        // Пульс після приземлення
         if (birdLanded) {
-            pulsePaint.setColor(Color.argb((int)(pulseAlpha * 200), 255, 30, 30));
-            pulsePaint.setStrokeWidth(4f);
-            canvas.drawCircle(cx, birdTargetY, pulseRadius + 30, pulsePaint);
+            pulsePaint.setColor(Color.argb((int)(pulseAlpha * 160), 255, 60, 60));
+            pulsePaint.setStrokeWidth(6f);
+            canvas.drawCircle(cx, cy + 10, pulseRadius + 20, pulsePaint);
         }
     }
 
-    /**
-     * Малюємо іконку літака (векторна — без bitmap залежностей)
-     */
-    private void drawAircraftIcon(Canvas canvas, float scale) {
-        Paint bodyPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        bodyPaint.setColor(Color.argb(230, 220, 30, 30));
-        bodyPaint.setStyle(Paint.Style.FILL);
+    private void drawAircraftPath(Canvas canvas, float scale) {
+        float s = 55f * scale;
 
-        Paint outlinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        outlinePaint.setColor(Color.WHITE);
-        outlinePaint.setStyle(Paint.Style.STROKE);
-        outlinePaint.setStrokeWidth(3f);
+        Paint body = new Paint(Paint.ANTI_ALIAS_FLAG);
+        body.setColor(Color.argb(230, 210, 20, 20));
+        body.setStyle(Paint.Style.FILL);
 
-        float s = 60f * scale;
-
-        // Корпус літака
-        Path body = new Path();
-        body.moveTo(0, -s);          // ніс
-        body.lineTo(s * 0.2f, s * 0.3f);
-        body.lineTo(0, s * 0.1f);
-        body.lineTo(-s * 0.2f, s * 0.3f);
-        body.close();
+        Paint outline = new Paint(Paint.ANTI_ALIAS_FLAG);
+        outline.setColor(Color.WHITE);
+        outline.setStyle(Paint.Style.STROKE);
+        outline.setStrokeWidth(3.5f);
 
         // Крила
         Path wings = new Path();
-        wings.moveTo(-s * 0.8f, s * 0.1f);
-        wings.lineTo(s * 0.8f, s * 0.1f);
-        wings.lineTo(s * 0.3f, s * 0.35f);
-        wings.lineTo(-s * 0.3f, s * 0.35f);
+        wings.moveTo(-s * 0.85f, s * 0.05f);
+        wings.lineTo( s * 0.85f, s * 0.05f);
+        wings.lineTo( s * 0.28f, s * 0.38f);
+        wings.lineTo(-s * 0.28f, s * 0.38f);
         wings.close();
 
         // Хвіст
         Path tail = new Path();
-        tail.moveTo(-s * 0.4f, s * 0.55f);
-        tail.lineTo(s * 0.4f, s * 0.55f);
-        tail.lineTo(s * 0.15f, s * 0.75f);
-        tail.lineTo(-s * 0.15f, s * 0.75f);
+        tail.moveTo(-s * 0.38f, s * 0.52f);
+        tail.lineTo( s * 0.38f, s * 0.52f);
+        tail.lineTo( s * 0.14f, s * 0.72f);
+        tail.lineTo(-s * 0.14f, s * 0.72f);
         tail.close();
 
-        canvas.drawPath(wings, bodyPaint);
-        canvas.drawPath(tail, bodyPaint);
-        canvas.drawPath(body, bodyPaint);
-        canvas.drawPath(wings, outlinePaint);
-        canvas.drawPath(body, outlinePaint);
+        // Корпус (ніс летить вниз — ↓)
+        Path fuselage = new Path();
+        fuselage.moveTo(0, -s);
+        fuselage.lineTo( s * 0.18f,  s * 0.28f);
+        fuselage.lineTo(0,           s * 0.10f);
+        fuselage.lineTo(-s * 0.18f,  s * 0.28f);
+        fuselage.close();
 
-        // Сигнальне коло навколо літака
-        Paint circlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        circlePaint.setColor(Color.argb(160, 255, 80, 80));
-        circlePaint.setStyle(Paint.Style.STROKE);
-        circlePaint.setStrokeWidth(5f);
-        canvas.drawCircle(0, s * 0f, s * 1.2f, circlePaint);
+        canvas.drawPath(wings,    body);
+        canvas.drawPath(tail,     body);
+        canvas.drawPath(fuselage, body);
+        canvas.drawPath(wings,    outline);
+        canvas.drawPath(fuselage, outline);
+
+        // Сигнальне червоне коло
+        Paint circle = new Paint(Paint.ANTI_ALIAS_FLAG);
+        circle.setColor(Color.argb(140, 255, 80, 80));
+        circle.setStyle(Paint.Style.STROKE);
+        circle.setStrokeWidth(4f);
+        canvas.drawCircle(0, 0, s * 1.3f, circle);
     }
 
-    /**
-     * Банер зверху екрану з назвою тривоги
-     */
+    // ----------------------------------------------------------------
+    // Банер
+    // ----------------------------------------------------------------
+
     private void drawAlertBanner(Canvas canvas, int w, int h) {
-        // Fade-in анімація
         long elapsed = System.currentTimeMillis() - bannerShowTime;
-        if (elapsed < 500) {
-            bannerAlpha = elapsed / 500f;
-        } else if (elapsed > BANNER_DURATION_MS - 500) {
-            bannerAlpha = Math.max(0, (BANNER_DURATION_MS - elapsed) / 500f);
-        } else {
+
+        if (elapsed < 400)
+            bannerAlpha = elapsed / 400f;
+        else if (elapsed > BANNER_MS - 600)
+            bannerAlpha = Math.max(0, (BANNER_MS - elapsed) / 600f);
+        else
             bannerAlpha = 1f;
-        }
 
-        if (bannerAlpha <= 0) {
-            showBanner = false;
-            return;
-        }
+        if (bannerAlpha <= 0) { showBanner = false; return; }
 
-        float bannerH = 140f;
+        float bh = 148f;
 
         // Градієнт фон
-        Paint gradPaint = new Paint();
-        gradPaint.setAlpha((int)(bannerAlpha * 230));
         LinearGradient grad = new LinearGradient(
-            0, 0, 0, bannerH,
-            Color.argb(255, 200, 0, 0),
-            Color.argb(200, 140, 0, 0),
+            0, 0, 0, bh,
+            Color.argb((int)(bannerAlpha * 255), 200, 10, 10),
+            Color.argb((int)(bannerAlpha * 210), 130, 0,  0),
             Shader.TileMode.CLAMP
         );
-        gradPaint.setShader(grad);
-        gradPaint.setStyle(Paint.Style.FILL);
+        bannerBgPaint.setShader(grad);
+        canvas.drawRect(0, 0, w, bh, bannerBgPaint);
 
-        RectF bannerRect = new RectF(0, 0, w, bannerH);
-        canvas.drawRoundRect(bannerRect, 0, 24f, gradPaint);
+        // Мигаючий лівий акцент
+        if ((System.currentTimeMillis() / 500) % 2 == 0) {
+            Paint accent = new Paint();
+            accent.setColor(Color.argb((int)(bannerAlpha * 255), 255, 220, 0));
+            accent.setStyle(Paint.Style.FILL);
+            canvas.drawRect(0, 0, 10f, bh, accent);
+        }
 
-        // Іконка ⚠ зліва
+        // Іконка ⚠
         Paint warnPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         warnPaint.setColor(Color.argb((int)(bannerAlpha * 255), 255, 230, 0));
-        warnPaint.setTextSize(64f);
+        warnPaint.setTextSize(70f);
         warnPaint.setTypeface(Typeface.DEFAULT_BOLD);
-        canvas.drawText("⚠", 60f, bannerH * 0.72f, warnPaint);
+        canvas.drawText("⚠", 60f, bh * 0.75f, warnPaint);
 
-        // Текст тривоги
+        // Заголовок
+        bannerTxtPaint.setTextSize(42f);
         bannerTxtPaint.setAlpha((int)(bannerAlpha * 255));
-        bannerTxtPaint.setTextSize(40f);
-        canvas.drawText("ПОВІТРЯНА ТРИВОГА", w / 2f + 20f, bannerH * 0.42f, bannerTxtPaint);
+        canvas.drawText("ПОВІТРЯНА ТРИВОГА", w / 2f + 25f, bh * 0.42f, bannerTxtPaint);
 
-        bannerTxtPaint.setTextSize(34f);
-        bannerTxtPaint.setAlpha((int)(bannerAlpha * 200));
-        canvas.drawText(bannerText, w / 2f + 20f, bannerH * 0.78f, bannerTxtPaint);
+        // Назва області
+        bannerTxtPaint.setTextSize(36f);
+        bannerTxtPaint.setAlpha((int)(bannerAlpha * 210));
+        canvas.drawText(bannerOblast, w / 2f + 25f, bh * 0.80f, bannerTxtPaint);
 
-        // Нижня смуга пульс
-        Paint linePaint = new Paint();
-        linePaint.setColor(Color.argb((int)(bannerAlpha * pulseAlpha * 255), 255, 100, 100));
-        linePaint.setStrokeWidth(4f);
-        canvas.drawLine(0, bannerH, w, bannerH, linePaint);
+        // Нижня лінія-пульс
+        Paint line = new Paint();
+        float lineAlpha = 0.5f + 0.5f * (float) Math.sin(System.currentTimeMillis() / 300.0);
+        line.setColor(Color.argb((int)(bannerAlpha * lineAlpha * 255), 255, 80, 80));
+        line.setStrokeWidth(3f);
+        canvas.drawLine(0, bh, w, bh, line);
     }
 
     // ----------------------------------------------------------------
-    // Анімація
+    // Анімація — головний loop
     // ----------------------------------------------------------------
 
-    /**
-     * Запустити анімацію при новій тривозі
-     */
     public void triggerAlert(AlertRegion alert) {
-        birdY      = -120f;
-        birdLanded = false;
-        pulseRadius = 0f;
-        pulseAlpha  = 1f;
-        showBanner  = true;
-        bannerText  = alert.locationTitle;
+        birdOffsetY   = -600f;  // старт — далеко зверху
+        birdLanded    = false;
+        pulseRadius   = 0f;
+        pulseAlpha    = 1f;
+        showBanner    = true;
+        bannerOblast  = alert.locationTitle;
         bannerShowTime = System.currentTimeMillis();
-        animating   = true;
+        animating     = true;
+        targetValid   = false;
 
-        // Ціль — центр екрану
-        birdTargetY = 300f;
-
-        startAnimation();
+        handler.post(animLoop);
     }
 
-    private void startAnimation() {
-        handler.post(new Runnable() {
-            @Override
-            public void run() {
-                if (!animating) return;
+    private final Runnable animLoop = new Runnable() {
+        @Override public void run() {
+            if (!animating) return;
 
-                // Плавне падіння пташки (easing)
-                float diff = birdTargetY - birdY;
-                if (Math.abs(diff) > 3f) {
-                    birdY += diff * 0.12f;
-                } else {
-                    birdY = birdTargetY;
-                    if (!birdLanded) {
-                        birdLanded = true;
-                        pulseRadius = 0f;
-                    }
+            // Плавний спуск (easing out)
+            if (!birdLanded) {
+                birdOffsetY += (0f - birdOffsetY) * 0.10f;
+                if (Math.abs(birdOffsetY) < 4f) {
+                    birdOffsetY = 0f;
+                    birdLanded  = true;
                 }
-
+            } else {
                 // Пульс після приземлення
-                if (birdLanded) {
-                    pulseRadius += 4f;
-                    pulseAlpha = Math.max(0, 1f - pulseRadius / 200f);
-                    if (pulseRadius > 200f) {
-                        pulseRadius = 0f;
-                        pulseAlpha  = 1f;
-                    }
-                }
-
-                // Оновлюємо карту
-                refreshMap();
-
-                if (animating) {
-                    handler.postDelayed(this, 16); // ~60fps
+                pulseRadius += 5f;
+                pulseAlpha = Math.max(0f, 1f - pulseRadius / 220f);
+                if (pulseRadius > 220f) {
+                    pulseRadius = 0f;
+                    pulseAlpha  = 1f;
                 }
             }
-        });
-    }
+
+            refreshMap();
+            handler.postDelayed(this, 16); // 60fps
+        }
+    };
 
     private void refreshMap() {
         OsmandMapTileView view = app.getOsmandMap() != null
             ? app.getOsmandMap().getMapView() : null;
-        if (view != null) {
-            view.refreshMap();
-        }
-    }
-
-    public void stopAnimation() {
-        animating  = false;
-        showBanner = false;
-        activeAlerts.clear();
-        refreshMap();
+        if (view != null) view.refreshMap();
     }
 
     // ----------------------------------------------------------------
@@ -398,17 +403,24 @@ public class AlertMapLayer extends OsmandMapLayer {
     // ----------------------------------------------------------------
 
     public void setAlerts(List<AlertRegion> alerts) {
-        this.activeAlerts = new ArrayList<>(alerts);
-        if (alerts.isEmpty()) {
-            stopAnimation();
-        }
+        activeAlerts.clear();
+        activeAlerts.addAll(alerts);
+        if (alerts.isEmpty()) stopAnimation();
+        else refreshMap();
     }
 
     public void onNewAlert(AlertRegion alert) {
-        if (!activeAlerts.contains(alert)) {
-            activeAlerts.add(alert);
-        }
+        if (!activeAlerts.contains(alert)) activeAlerts.add(alert);
         triggerAlert(alert);
+    }
+
+    public void stopAnimation() {
+        animating   = false;
+        showBanner  = false;
+        targetValid = false;
+        activeAlerts.clear();
+        handler.removeCallbacks(animLoop);
+        refreshMap();
     }
 
     // ----------------------------------------------------------------
@@ -416,19 +428,13 @@ public class AlertMapLayer extends OsmandMapLayer {
     // ----------------------------------------------------------------
 
     @Override
-    public void initLayer(@NonNull OsmandMapTileView view) {
-        super.initLayer(view);
-    }
+    public void initLayer(@NonNull OsmandMapTileView view) { super.initLayer(view); }
 
     @Override
-    public void destroyLayer() {
-        stopAnimation();
-    }
+    public void destroyLayer() { stopAnimation(); }
 
     @Override
-    public boolean drawInScreenPixels() {
-        return true; // малюємо в координатах екрану, не карти
-    }
+    public boolean drawInScreenPixels() { return false; } // coords у тайл-боксі
 
     @Override
     public boolean onLongPressEvent(@NonNull PointF point, @NonNull RotatedTileBox tileBox) {
@@ -437,9 +443,8 @@ public class AlertMapLayer extends OsmandMapLayer {
 
     @Override
     public boolean onSingleTap(@NonNull PointF point, @NonNull RotatedTileBox tileBox) {
-        // Тап на банер — відкриває деталі тривоги
-        if (showBanner && point.y < 140f) {
-            // TODO: відкрити AlertDetailsFragment
+        if (showBanner && point.y < 148f) {
+            // TODO: AlertDetailsFragment
             return true;
         }
         return false;
