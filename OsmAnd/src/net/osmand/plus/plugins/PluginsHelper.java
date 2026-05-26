@@ -75,6 +75,7 @@ import net.osmand.plus.widgets.ctxmenu.ContextMenuAdapter;
 import net.osmand.plus.widgets.popup.PopUpMenuItem;
 import net.osmand.plus.wikipedia.WikipediaPlugin;
 import net.osmand.plus.plugins.safenav.SafeNavPlugin;
+import net.osmand.plus.plugins.safenav.ml.TrainingRecorderPlugin;
 import net.osmand.render.RenderingRuleProperty;
 import net.osmand.render.RenderingRulesStorage;
 import net.osmand.search.core.SearchPhrase;
@@ -131,6 +132,8 @@ public class PluginsHelper {
 
 		// SafeNav — Навігація під час РЕБ / повітряних тривог
 		allPlugins.add(new SafeNavPlugin(app));
+		// SafeNav — Запис тренувальних даних для НН
+		allPlugins.add(new TrainingRecorderPlugin(app));
 
 		loadCustomPlugins(app);
 		registerAppInitializingDependedProperties(app);
