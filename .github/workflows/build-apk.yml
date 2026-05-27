@@ -3,48 +3,79 @@ name: SafeNav Build APK
 on:
   push:
     branches: [ safenav-ua ]
-  workflow_dispatch:       # кнопка ручного запуску
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout коду
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: safenav-ua
+          submodules: false
 
       - name: Java 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
+          cache: gradle
 
-      - name: Gradle cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ hashFiles('**/*.gradle*') }}
-          restore-keys: gradle-
+      - name: Android SDK + NDK
+        uses: android-actions/setup-android@v3
+
+      - name: NDK
+        run: |
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            "ndk;23.1.7779620" \
+            "build-tools;35.0.0" \
+            "platforms;android-35"
 
       - name: Права на gradlew
         run: chmod +x gradlew
 
-      - name: Збільшити пам'ять Gradle
+      - name: Налаштування Gradle
         run: |
-          echo "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m" \
-            >> gradle.properties
-          echo "org.gradle.daemon=false" >> gradle.properties
+          cat >> gradle.properties << 'EOF'
+          org.gradle.jvmargs=-Xmx6144m -XX:MaxMetaspaceSize=512m
+          org.gradle.daemon=false
+          org.gradle.parallel=false
+          android.useAndroidX=true
+          EOF
 
-      - name: Збірка APK (legacy debug)
-        run: ./gradlew :OsmAnd:assembleLegacyDebug --stacktrace
+      - name: Gradle dependencies
+        run: ./gradlew dependencies --configuration legacyDebugRuntimeClasspath \
+               --no-daemon || true
 
-      - name: Завантажити APK як артефакт
+      - name: Збірка APK
+        run: |
+          ./gradlew :OsmAnd:assembleLegacyDebug \
+            --no-daemon \
+            --stacktrace \
+            -x test \
+            -x lint
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/23.1.7779620
+
+      - name: Знайти APK
+        run: find OsmAnd/build/outputs -name "*.apk" -type f
+
+      - name: Зберегти APK
         uses: actions/upload-artifact@v4
+        if: success()
         with:
-          name: SafeNav-debug
-          path: OsmAnd/build/outputs/apk/legacy/debug/*.apk
+          name: SafeNav-debug-${{ github.run_number }}
+          path: OsmAnd/build/outputs/apk/**/*.apk
           retention-days: 30
+
+      - name: Зберегти логи помилок
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: build-logs-${{ github.run_number }}
+          path: |
+            **/build/reports/
+            **/build/outputs/logs/
+          retention-days: 7
