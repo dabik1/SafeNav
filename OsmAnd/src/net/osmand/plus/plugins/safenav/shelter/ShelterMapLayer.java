@@ -155,10 +155,8 @@ public class ShelterMapLayer extends OsmandMapLayer {
             Shelter s = shelters.get(i);
             if (s.location == null) continue;
 
-            float xyX = tileBox.getPixXFromLatLon(s.location.getLatitude(), s.location.getLongitude();
-            float xyY = tileBox.getPixYFromLatLon(s.location.getLatitude(), s.location.getLongitude();
-            float px = xyX;
-            float py = xyY;
+            float px = tileBox.getPixXFromLatLon(s.location.getLatitude(), s.location.getLongitude());
+            float py = tileBox.getPixYFromLatLon(s.location.getLatitude(), s.location.getLongitude());
 
             boolean isNearest = (i == 0);
             boolean isSelected = (i == currentCardIndex);
@@ -219,14 +217,14 @@ public class ShelterMapLayer extends OsmandMapLayer {
         Shelter nearest = shelters.get(0);
         if (nearest.location == null) return;
 
-        float xyX = tileBox.getPixXFromLatLon(nearest.location.getLatitude(), nearest.location.getLongitude();
-        float xyY = tileBox.getPixYFromLatLon(nearest.location.getLatitude(), nearest.location.getLongitude();
+        float px = tileBox.getPixXFromLatLon(nearest.location.getLatitude(), nearest.location.getLongitude());
+        float py = tileBox.getPixYFromLatLon(nearest.location.getLatitude(), nearest.location.getLongitude());
 
         Paint pulse = new Paint(Paint.ANTI_ALIAS_FLAG);
         pulse.setStyle(Paint.Style.STROKE);
         pulse.setStrokeWidth(4f);
         pulse.setColor(Color.argb((int)(pulseAlpha * 180), 50, 230, 100));
-        canvas.drawCircle(xyX, xyY, pulseR + 36, pulse);
+        canvas.drawCircle(px, py, pulseR + 36, pulse);
     }
 
     // ----------------------------------------------------------------
@@ -236,10 +234,10 @@ public class ShelterMapLayer extends OsmandMapLayer {
     private void drawRouteLine(Canvas canvas, RotatedTileBox tileBox, Shelter target) {
         if (target == null || target.location == null) return;
 
-        float userXYX = tileBox.getPixXFromLatLon(userPosition.getLatitude(), userPosition.getLongitude();
-        float userXYY = tileBox.getPixYFromLatLon(userPosition.getLatitude(), userPosition.getLongitude();
-        float shelterXYX = tileBox.getPixXFromLatLon(target.location.getLatitude(), target.location.getLongitude();
-        float shelterXYY = tileBox.getPixYFromLatLon(target.location.getLatitude(), target.location.getLongitude();
+        float userPx = tileBox.getPixXFromLatLon(userPosition.getLatitude(), userPosition.getLongitude());
+        float userPy = tileBox.getPixYFromLatLon(userPosition.getLatitude(), userPosition.getLongitude());
+        float shelterPx = tileBox.getPixXFromLatLon(target.location.getLatitude(), target.location.getLongitude());
+        float shelterPy = tileBox.getPixYFromLatLon(target.location.getLatitude(), target.location.getLongitude());
 
         Path line = new Path();
         line.moveTo(userPx, userPy);
@@ -491,10 +489,10 @@ public class ShelterMapLayer extends OsmandMapLayer {
         for (int i = 0; i < shelters.size(); i++) {
             Shelter s = shelters.get(i);
             if (s.location == null) continue;
-            float xyX = tileBox.getPixXFromLatLon(s.location.getLatitude(), s.location.getLongitude();
-            float xyY = tileBox.getPixYFromLatLon(s.location.getLatitude(), s.location.getLongitude();
+            float spx = tileBox.getPixXFromLatLon(s.location.getLatitude(), s.location.getLongitude());
+            float spy = tileBox.getPixYFromLatLon(s.location.getLatitude(), s.location.getLongitude());
             float dist = (float) Math.sqrt(
-                Math.pow(point.x - xyX, 2) + Math.pow(point.y - xyY, 2));
+                Math.pow(point.x - spx, 2) + Math.pow(point.y - spy, 2));
             if (dist < 50f) {
                 currentCardIndex = i;
                 refreshMap();
