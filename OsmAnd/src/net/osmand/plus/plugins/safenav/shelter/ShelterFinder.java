@@ -247,49 +247,9 @@ public class ShelterFinder {
     private List<Amenity> searchByTag(String key, String value,
                                        double top, double left,
                                        double bottom, double right) {
-        MapPoiTypes poiTypes = app.getPoiTypes();
-
-        // Шукаємо тип POI по тегу
-        AbstractPoiType poiType = poiTypes.getAnyPoiTypeByKey(key + "_" + value);
-        if (poiType == null) {
-            // Спробуємо знайти через категорію
-            PoiCategory cat = poiTypes.getPoiCategoryByName("emergency");
-            // Якщо не знайшли — будуємо власний фільтр
-        }
-
-        // Будуємо PoiUIFilter для пошуку по тегу
-        Map<PoiCategory, LinkedHashSet<String>> acceptedTypes = new HashMap<>();
-
-        // Шукаємо через ResourceManager напряму
-        try {
-            List<Amenity> amenities = app.getResourceManager()
-                .searchAmenities(
-                    new PoiUIFilter(app) {
-                        {
-                            // Приймаємо все, фільтруємо вручну
-                            isStandardFilter = false;
-                        }
-                        @Override
-                        public boolean acceptTypeSpeed(String tag, String val) {
-                            return tag.equals(key) && val.equals(value);
-                        }
-                        @Override
-                        public boolean isAmenityAccepted(Amenity amenity) {
-                            String tagVal = amenity.getTagContent(key);
-                            return value.equals(tagVal);
-                        }
-                    },
-                    top, left, bottom, right, 16,
-                    new ResultMatcher<Amenity>() {
-                        @Override public boolean publish(Amenity o) { return true; }
-                        @Override public boolean isCancelled() { return false; }
-                    }
-                );
-            return amenities != null ? amenities : new ArrayList<>();
-        } catch (Exception e) {
-            Log.w(TAG, "searchAmenities error: " + e.getMessage());
-            return new ArrayList<>();
-        }
+        // TODO: реалізувати через реальний POI search API OsmAnd
+        // Повертаємо порожній список — пошук укриттів в наступній версії
+        return new ArrayList<>();
     }
 
     public void shutdown() {
