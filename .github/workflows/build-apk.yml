@@ -13,17 +13,32 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout SafeNav
         uses: actions/checkout@v4
         with:
           ref: safenav-ua
+          path: SafeNav
+
+      # OsmAnd очікує ../resources/ — клонуємо поруч
+      - name: Checkout OsmAnd-resources
+        uses: actions/checkout@v4
+        with:
+          repository: osmandapp/OsmAnd-resources
+          path: resources
+
+      # Gradle кеш
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/caches
+          key: gradle-${{ hashFiles('SafeNav/**/*.gradle*') }}
+          restore-keys: gradle-
 
       - name: Java 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
 
       - name: Android SDK + NDK
         run: |
@@ -34,6 +49,7 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/23.1.7779620" >> $GITHUB_ENV
 
       - name: Права + налаштування Gradle
+        working-directory: SafeNav
         run: |
           chmod +x gradlew
           cat >> gradle.properties << 'EOF'
@@ -42,7 +58,15 @@ jobs:
           org.gradle.parallel=false
           EOF
 
+      - name: Перевірка структури
+        run: |
+          echo "=== Структура ==="
+          ls -la
+          echo "=== resources/rendering_styles ==="
+          ls resources/rendering_styles/style-icons/ 2>/dev/null || echo "Папки немає"
+
       - name: Збірка APK
+        working-directory: SafeNav
         run: |
           ./gradlew :OsmAnd:assembleGplayFullLegacyFatDebug \
             --no-daemon \
@@ -54,9 +78,7 @@ jobs:
 
       - name: Показати помилки
         if: failure()
-        run: |
-          echo "====== ОСТАННІ 100 РЯДКІВ ======"
-          tail -100 /tmp/gradle-build.log
+        run: tail -100 /tmp/gradle-build.log
 
       - name: Зберегти лог
         if: always()
@@ -71,5 +93,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: SafeNav-debug-${{ github.run_number }}
-          path: OsmAnd/build/outputs/apk/**/gplayFullLegacyFat/debug/*.apk
+          path: SafeNav/OsmAnd/build/outputs/apk/**/gplayFullLegacyFat/debug/*.apk
           retention-days: 30
