@@ -199,7 +199,7 @@ public class ImuTrainingRecorder implements SensorEventListener {
     public void onSensorChanged(SensorEvent event) {
         if (!recording) return;
 
-        switch (event.sensor.type) {
+        switch (event.sensor.getType()) {
             case Sensor.TYPE_ACCELEROMETER:
                 accel = event.values.clone();
                 imuTs = event.timestamp;
