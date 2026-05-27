@@ -25,14 +25,15 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Android SDK
+      - name: Android SDK + NDK
         run: |
           echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
             "ndk;23.1.7779620" \
             "build-tools;35.0.0" \
             "platforms;android-35" 2>/dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/23.1.7779620" >> $GITHUB_ENV
 
-      - name: Права + налаштування
+      - name: Права + налаштування Gradle
         run: |
           chmod +x gradlew
           cat >> gradle.properties << 'EOF'
@@ -41,26 +42,20 @@ jobs:
           org.gradle.parallel=false
           EOF
 
-      - name: Збірка APK (з логом)
+      - name: Збірка APK
         run: |
-          ./gradlew :OsmAnd:assembleLegacyDebug \
+          ./gradlew :OsmAnd:assembleGplayFullLegacyFatDebug \
             --no-daemon \
             --stacktrace \
-            --info \
             -x test \
             -x lint \
             2>&1 | tee /tmp/gradle-build.log
-          
-          # Виводимо тільки помилки якщо збірка впала
           exit ${PIPESTATUS[0]}
 
-      - name: Показати помилки якщо впало
+      - name: Показати помилки
         if: failure()
         run: |
-          echo "====== ERRORS ======"
-          grep -E "^(error:|FAILED|> Task|Execution failed|> Could not|Cannot|what went wrong)" \
-            /tmp/gradle-build.log | tail -50
-          echo "====== LAST 100 LINES ======"
+          echo "====== ОСТАННІ 100 РЯДКІВ ======"
           tail -100 /tmp/gradle-build.log
 
       - name: Зберегти лог
@@ -76,5 +71,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: SafeNav-debug-${{ github.run_number }}
-          path: OsmAnd/build/outputs/apk/**/*.apk
+          path: OsmAnd/build/outputs/apk/**/gplayFullLegacyFat/debug/*.apk
           retention-days: 30
