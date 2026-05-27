@@ -5,6 +5,9 @@ on:
     branches: [ safenav-ua ]
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -14,7 +17,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: safenav-ua
-          submodules: false
 
       - name: Java 17
         uses: actions/setup-java@v4
@@ -23,59 +25,56 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Android SDK + NDK
-        uses: android-actions/setup-android@v3
-
-      - name: NDK
+      - name: Android SDK
         run: |
           echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
             "ndk;23.1.7779620" \
             "build-tools;35.0.0" \
-            "platforms;android-35"
+            "platforms;android-35" 2>/dev/null
 
-      - name: Права на gradlew
-        run: chmod +x gradlew
-
-      - name: Налаштування Gradle
+      - name: Права + налаштування
         run: |
+          chmod +x gradlew
           cat >> gradle.properties << 'EOF'
           org.gradle.jvmargs=-Xmx6144m -XX:MaxMetaspaceSize=512m
           org.gradle.daemon=false
           org.gradle.parallel=false
-          android.useAndroidX=true
           EOF
 
-      - name: Gradle dependencies
-        run: ./gradlew dependencies --configuration legacyDebugRuntimeClasspath \
-               --no-daemon || true
-
-      - name: Збірка APK
+      - name: Збірка APK (з логом)
         run: |
           ./gradlew :OsmAnd:assembleLegacyDebug \
             --no-daemon \
             --stacktrace \
+            --info \
             -x test \
-            -x lint
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/23.1.7779620
+            -x lint \
+            2>&1 | tee /tmp/gradle-build.log
+          
+          # Виводимо тільки помилки якщо збірка впала
+          exit ${PIPESTATUS[0]}
 
-      - name: Знайти APK
-        run: find OsmAnd/build/outputs -name "*.apk" -type f
+      - name: Показати помилки якщо впало
+        if: failure()
+        run: |
+          echo "====== ERRORS ======"
+          grep -E "^(error:|FAILED|> Task|Execution failed|> Could not|Cannot|what went wrong)" \
+            /tmp/gradle-build.log | tail -50
+          echo "====== LAST 100 LINES ======"
+          tail -100 /tmp/gradle-build.log
+
+      - name: Зберегти лог
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-log-${{ github.run_number }}
+          path: /tmp/gradle-build.log
+          retention-days: 7
 
       - name: Зберегти APK
-        uses: actions/upload-artifact@v4
         if: success()
+        uses: actions/upload-artifact@v4
         with:
           name: SafeNav-debug-${{ github.run_number }}
           path: OsmAnd/build/outputs/apk/**/*.apk
           retention-days: 30
-
-      - name: Зберегти логи помилок
-        uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: build-logs-${{ github.run_number }}
-          path: |
-            **/build/reports/
-            **/build/outputs/logs/
-          retention-days: 7
