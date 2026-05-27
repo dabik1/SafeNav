@@ -1667,7 +1667,7 @@ public class UkraineOblastBoundaries {
     }
 
 
-    }
+
 
     public static Map<String, double[][][]> getBoundaries() {
         return BOUNDARIES;
