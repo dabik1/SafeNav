@@ -1,0 +1,50 @@
+name: SafeNav Build APK
+
+on:
+  push:
+    branches: [ safenav-ua ]
+  workflow_dispatch:       # кнопка ручного запуску
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout коду
+        uses: actions/checkout@v4
+        with:
+          ref: safenav-ua
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('**/*.gradle*') }}
+          restore-keys: gradle-
+
+      - name: Права на gradlew
+        run: chmod +x gradlew
+
+      - name: Збільшити пам'ять Gradle
+        run: |
+          echo "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m" \
+            >> gradle.properties
+          echo "org.gradle.daemon=false" >> gradle.properties
+
+      - name: Збірка APK (legacy debug)
+        run: ./gradlew :OsmAnd:assembleLegacyDebug --stacktrace
+
+      - name: Завантажити APK як артефакт
+        uses: actions/upload-artifact@v4
+        with:
+          name: SafeNav-debug
+          path: OsmAnd/build/outputs/apk/legacy/debug/*.apk
+          retention-days: 30
