@@ -146,9 +146,8 @@ public class AlertMapLayer extends OsmandMapLayer {
         double[] centroid = UkraineOblastBoundaries.getCentroid(polygons);
         if (centroid != null) {
             // Конвертуємо geo → screen
-            float[] screenPt = tileBox.getPixXYForLatLon(centroid[1], centroid[0]);
-            targetScreenX = screenPt[0];
-            targetScreenY = screenPt[1];
+            targetScreenX = tileBox.getPixXFromLatLon(centroid[1], centroid[0]);
+            targetScreenY = tileBox.getPixYFromLatLon(centroid[1], centroid[0]);
             targetValid   = true;
         }
 
@@ -185,9 +184,8 @@ public class AlertMapLayer extends OsmandMapLayer {
             // Перевірка що координати в межах України
             if (lat < 44 || lat > 53 || lon < 22 || lon > 41) continue;
 
-            float[] xy = tileBox.getPixXYForLatLon(lat, lon);
-            float px = xy[0];
-            float py = xy[1];
+            float px = tileBox.getPixXFromLatLon(lat, lon);
+            float py = tileBox.getPixYFromLatLon(lat, lon);
 
             if (first) {
                 path.moveTo(px, py);
